@@ -5,10 +5,10 @@
 #pragma pack(push, 1)
 struct pkt_header
 {
-    uint16_t header;
-    uint8_t id;
-    uint16_t seq;
-    uint8_t size;
+    uint16_t  header;
+    uint8_t   id;
+    uint16_t  seq;
+    uint8_t   size;
 };
 #pragma pack(pop)
 
