@@ -1,14 +1,17 @@
 #include <iostream>
 #include <fstream>
 #include <optional>
+#include <iomanip>
+
+
 
 #pragma pack(push, 1)
 struct pkt_header
 {
-    uint16_t  header;
-    uint8_t   id;
-    uint16_t  seq;
-    uint8_t   size;
+    uint16_t header;
+    uint8_t id;
+    uint16_t seq;
+    uint8_t size;
 };
 #pragma pack(pop)
 
@@ -27,6 +30,7 @@ enum class validity_status : uint8_t
     valid
 };
 
+
 uint8_t check_sum(const pkt &read_pkt)
 {
     uint8_t cs{0};
@@ -41,34 +45,32 @@ uint8_t check_sum(const pkt &read_pkt)
     return cs;
 }
 
-
 bool read_frame(std::istream &ifs, pkt &read_pkt)
 {
-  
+
     auto packet_found{0};
-    while(ifs.good())
+    read_pkt.header.header = -1;
+    while (ifs.good())
     {
-            ifs.read((char *)&read_pkt.header, sizeof(read_pkt.header));
+        ifs.read((char *)&read_pkt.header, sizeof(read_pkt.header));
 
-            if (read_pkt.header.header == 0x0000){
-               packet_found = 1;
-                break;
-            }
+        if (read_pkt.header.header == 0x0000)
+        {
+            packet_found = 1;
+            break;
+        }
 
-//            auto back = ifs.tellg() - (std::streampos)(sizeof(read_pkt.header)-1);
+        //            auto back = ifs.tellg() - (std::streampos)(sizeof(read_pkt.header)-1);
 
-            auto pos = ifs.tellg();
-            pos -= sizeof(read_pkt.header)-1;
+        auto pos = ifs.tellg();
+        pos -= sizeof(read_pkt.header) - 1;
 
-
-            ifs.seekg(pos);
-            
-
+        ifs.seekg(pos);
     }
-    if(packet_found == 0){
+    if (packet_found == 0)
+    {
         return false;
     }
-
 
     uint8_t *content_ptr = new uint8_t[read_pkt.header.size];
 
@@ -77,30 +79,61 @@ bool read_frame(std::istream &ifs, pkt &read_pkt)
     ifs.read((char *)read_pkt.content, read_pkt.header.size);
     ifs.read((char *)&read_pkt.checksum, sizeof(read_pkt.checksum));
 
+   
     auto calc_cs{check_sum(read_pkt)};
     auto valid_cs{calc_cs == read_pkt.checksum};
-    if(valid_cs){
-         return true;
+   // print_pkt(read_pkt, valid_cs);
+    if (valid_cs)
+    {
+        return true;
     }
-    // char * _ptr = (char *)&read_pkt.header;
-    // auto header_found{0};
-    // for (size_t i = 0; i < sizeof(read_pkt.header) -1 ; i++)
-    // {
-    //   if( _ptr[i] == 0x00 && _ptr[i+1] == 0x00){
-    //      header_found = 1;
-    //       auto pos = ifs.tellg();
-    //       pos += i;
-    //       ifs.seekg(pos);
-    //       return false;
-    //   }
-    // }
+    //todo:  not test yet
+    char *_ptr = (char *)&read_pkt.header;
+    auto header_found{0};
+    auto found_index{0};
+    for (size_t i = sizeof(read_pkt.header.header); i < sizeof(read_pkt.header) - 1; i++)
+    {
+        if (_ptr[i] == 0x00 && _ptr[i + 1] == 0x00)
+        {
+            header_found = 1;
+            found_index = i;
+            break;
+        }
+    }
+    if(header_found == 0){
+        if(_ptr[sizeof(read_pkt.header) - 1] == 0x00 &&read_pkt.content[0] == 0x00){
+             header_found = 1;
+             found_index = sizeof(read_pkt.header) ;
+
+        }
+        if(header_found == 0){
+              _ptr = (char *)read_pkt.content;
+  
+            for (size_t i = 0; i < read_pkt.header.size - 1; i++)
+            {
+                if (_ptr[i] == 0x00 && _ptr[i + 1] == 0x00)
+                {
+                    header_found = 1;
+                    found_index = sizeof(read_pkt.header) + i;
+                    break;
+                }
+            }
+
+        }
       
 
+    }
+    
+    if(header_found){
+        auto pos = ifs.tellg();
+        pos -= sizeof(read_pkt.header) + read_pkt.header.size + sizeof(read_pkt.checksum) - found_index;
+        ifs.seekg(pos);
+        return false;
 
+    }
+    
     return true;
 }
-
-
 
 validity_status check_validity(const pkt &read_pkt, std::optional<uint16_t> &pre_seq)
 {
@@ -110,27 +143,28 @@ validity_status check_validity(const pkt &read_pkt, std::optional<uint16_t> &pre
     auto valid_seq{(!pre_seq || (pre_seq.value() + 1 == read_pkt.header.seq))};
     pre_seq = read_pkt.header.seq;
 
-
     validity_status ret_val{validity_status::in_vaild_all};
-    if(valid_cs && valid_seq){
-        ret_val= validity_status::valid;
-    } 
-    else if(valid_cs == 0 && valid_seq == 1){
-        validity_status::in_valid_seq;
-    } 
-    else if(valid_cs == 1 && valid_seq == 0){
-        validity_status::in_valid_cs;
+    if (valid_cs && valid_seq)
+    {
+        ret_val = validity_status::valid;
+    }
+    else if (valid_cs == 0 && valid_seq == 1)
+    {
+         ret_val = validity_status::in_valid_cs;
+    }
+    else if (valid_cs == 1 && valid_seq == 0)
+    {
+        ret_val =  validity_status::in_valid_seq;
     }
 
-
-   return ret_val;
+    return ret_val;
 }
 
 void print_pkt(const pkt &read_pkt, uint32_t pkt_num)
 {
 
     std::cout << "PKT " << (int)pkt_num << "\t";
-    std::cout << "ID=0x" << std::hex << (int)read_pkt.header.id << "\t";
+    std::cout << "ID=0x" << std::setw(2) << std::setfill('0') <<  std::hex << (int)read_pkt.header.id << "\t";
 
     std::cout << "Seq=" << std::dec << (int)read_pkt.header.seq << "\t";
 
@@ -139,7 +173,7 @@ void print_pkt(const pkt &read_pkt, uint32_t pkt_num)
         std::cout << "Content =0x";
         for (size_t i = 0; i < read_pkt.header.size; i++)
         {
-            std::cout << std::hex << (int)read_pkt.content[i];
+            std::cout << std::setw(2) << std::setfill('0') << std::hex << (int)read_pkt.content[i];
         }
     }
     else
@@ -162,32 +196,31 @@ int main()
     auto in_valid_seq_cnt{0};
     while (in_file.good())
     {
-
-        if(read_frame(in_file, read_pkt))
+        
+        if (read_frame(in_file, read_pkt))
         {
 
             validity_status validity;
             validity = check_validity(read_pkt, pre_seq);
-            if (validity == validity_status::valid)
+            if (validity == validity_status::valid | validity == validity_status::in_valid_seq)
             {
                 pkt_num++;
+                
                 print_pkt(read_pkt, pkt_num);
             }
-            else if (validity == validity_status::in_valid_cs)
+            if (validity == validity_status::in_valid_cs)
             {
                 in_valid_cs_cnt++;
             }
-            else if (validity == validity_status::in_valid_seq)
+             if (validity == validity_status::in_valid_seq)
             {
                 in_valid_seq_cnt++;
             }
-            else
+            if(validity == validity_status::in_vaild_all)
             {
                 in_valid_cs_cnt++;
                 in_valid_seq_cnt++;
             }
-
-            
         }
     }
 
